@@ -1,0 +1,105 @@
+revceiver code: #include <esp_now.h>
+#include <WiFi.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
+#include <HTTPClient.h>
+// OLED display setup
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET    -1
+#define i2c_Address 0x3C
+Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+//Thingspeak gateway 
+const char* ssid = "OM_Sai_5G";  // Replace with WiFi SSID
+const char* password = "931164229_uditmishra";  // Replace with WiFi password
+const char* server = "http://api.thingspeak.com/update";
+const char* apiKey = "ZTRI35H2ME63M7FK";  // Replace with API key
+// Structure to hold received data
+typedef struct {
+  float distance;
+  float temp;
+} SensorData;
+
+SensorData receivedData;
+
+// ESP-NOW callback function
+void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
+  memcpy(&receivedData, incomingData, sizeof(receivedData));
+  Serial.print("Received Distance: ");
+  Serial.print(receivedData.distance);
+  Serial.println(" cm");
+
+  // Display data on OLED
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(10, 20);
+  display.print("Temp: ");
+  display.print(receivedData.distance);
+  display.print(" C ");
+  display.print("    Dist: ");
+  display.print(receivedData.temp);
+  display.print(" cm");
+  display.display();
+}
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+
+  // Initialize OLED display
+  if (!display.begin(i2c_Address, true)) {
+    Serial.println("SSD1306 allocation failed");
+    return;
+  }
+  
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(10, 20);
+  display.print("Waiting...");
+  display.display();
+
+  // Initialize ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW Init Failed");
+    return;
+  }
+
+  // Register ESP-NOW receive callback
+  esp_now_register_recv_cb(OnDataRecv);
+
+  // Thingspeak
+  WiFi.begin(ssid, password);
+
+  Serial.print("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected!");
+}
+
+void loop() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    String url = String(server) + "?api_key=" + apiKey + "&field1=" + String(receivedData.distance);
+
+    http.begin(url);
+    
+    int httpResponseCode = http.GET();
+    if (httpResponseCode > 0) {
+      Serial.println("Data sent to ThingSpeak!");
+    } else {
+      Serial.print("Error: ");
+      Serial.println(httpResponseCode);
+    }
+    
+    http.end();
+  } else {
+    Serial.println("WiFi Disconnected!");
+  }
+
+  delay(15000);  // Send data every 15 seconds (ThingSpeak limit)
+}
